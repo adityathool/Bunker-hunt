@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>Bunker Stalker - Enhanced Bobbing</title>
+    <style>
+        * { box-sizing: border-box; touch-action: none; -webkit-user-select: none; user-select: none; }
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; position: fixed; font-family: 'Courier New', Courier, monospace; }
+        #overlay { position: fixed; inset: 0; background: #000; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; }
+        #start-btn { padding: 20px 50px; font-size: 20px; background: #900; color: white; border: none; cursor: pointer; border-radius: 5px; font-weight: bold; }
+        #game-container { width: 100%; height: 100%; position: relative; }
+        #death-screen { position: absolute; inset: 0; background: #000; z-index: 2000; color: #f00; display: none; align-items: center; justify-content: center; font-size: 18px; text-align: center; padding: 20px; font-weight: bold; }
+        #joystick-container { position: absolute; bottom: 12%; left: 8%; width: 80px; height: 80px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.2); border-radius: 50%; }
+        #joystick-knob { position: absolute; top: 20px; left: 20px; width: 40px; height: 40px; background: #fff; border-radius: 50%; opacity: 0.7; }
+        #ui-layer { position: absolute; bottom: 12%; right: 8%; }
+        .btn { padding: 18px 35px; background: rgba(255,255,255,0.2); border: 2px solid #fff; color: white; border-radius: 8px; font-weight: bold; }
+        #cursor { position: absolute; top: 50%; left: 50%; width: 6px; height: 6px; background: white; border-radius: 50%; transform: translate(-50%, -50%); pointer-events: none; z-index: 10; border: 1px solid black;}
+    </style>
+</head>
+<body>
+
+    <div id="overlay">
+        <h2>VOID TRESPASS</h2>
+        <button id="start-btn">START</button>
+    </div>
+
+    <div id="game-container">
+        <div id="death-screen">YOU WERE NOT SUPPOSED TO BE HERE</div>
+        <div id="cursor"></div>
+        <div id="joystick-container"><div id="joystick-knob"></div></div>
+        <div id="ui-layer"><div id="flashlight-toggle" class="btn">LIGHT</div></div>
+    </div>
+
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js" } }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+
+        let gameActive = false;
+        const startBtn = document.getElementById('start-btn');
+        const overlay = document.getElementById('overlay');
+        const deathScreen = document.getElementById('death-screen');
+
+        startBtn.addEventListener('click', () => {
+            overlay.style.display = 'none';
+            deathScreen.style.display = 'none';
+            gameActive = true;
+            if(!window.gameInitialized) init();
+            else resetGame();
+        });
+
+        let scene, camera, renderer, player, entity, isLightOn = false, flashlight, handGroup;
+        let collidableWalls = [];
+        let raycaster = new THREE.Raycaster();
+        let bobTimer = 0;
+
+        function init() {
+            window.gameInitialized = true;
+            scene = new THREE.Scene();
+            scene.fog = new THREE.Fog(0x000000, 1, 75);
+
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 150);
+            renderer = new THREE.WebGLRenderer({ antialias: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.2));
+            document.getElementById('game-container').appendChild(renderer.domElement);
+
+            scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+
+            // Hand and Flashlight Setup
+            handGroup = new THREE.Group();
+            
+            const armGeo = new THREE.CylinderGeometry(0.05, 0.07, 0.6, 8);
+            const handMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+            const arm = new THREE.Mesh(armGeo, handMat);
+            arm.rotation.x = Math.PI / 2.5;
+            arm.position.set(0.35, -0.4, -0.3);
+            handGroup.add(arm);
+
+            const lightBodyGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.2, 8);
+            const lightBody = new THREE.Mesh(lightBodyGeo, new THREE.MeshStandardMaterial({color: 0x222222}));
+            lightBody.rotation.x = Math.PI / 2;
+            lightBody.position.set(0.35, -0.25, -0.55);
+            handGroup.add(lightBody);
+
+            flashlight = new THREE.SpotLight(0xffffff, 0, 100, 0.7, 0.15, 1);
+            flashlight.position.set(0.35, -0.25, -0.55);
+            const flashTarget = new THREE.Object3D();
+            flashTarget.position.set(0.35, -0.25, -2);
+            handGroup.add(flashlight);
+            handGroup.add(flashTarget);
+            flashlight.target = flashTarget;
+
+            camera.add(handGroup);
+
+            document.getElementById('flashlight-toggle').addEventListener('touchstart', (e) => {
+                e.preventDefault();
+                isLightOn = !isLightOn;
+                flashlight.intensity = isLightOn ? 30 : 0;
+            });
+
+            // Materials and Map
+            const wallMat = new THREE.MeshStandardMaterial({ color: 0x777777 });
+            const floorMat = new THREE.MeshStandardMaterial({ color: 0x1a2e1a });
+            const R_SIZE = 20, D_GAP = 6;
+
+            function addWall(w, h, d, x, z, ry) {
+                const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+                m.position.set(x, h/2, z); m.rotation.y = ry;
+                scene.add(m);
+                collidableWalls.push({box: new THREE.Box3().setFromObject(m), mesh: m});
+            }
+
+            function createRoom(cx, cz, n, s, e, w) {
+                const h = 6, seg = (R_SIZE - D_GAP) / 2, off = (R_SIZE / 2) - (seg / 2);
+                if (!n) addWall(R_SIZE, h, 0.5, cx, cz - R_SIZE/2, 0); else { addWall(seg, h, 0.5, cx-off, cz-R_SIZE/2, 0); addWall(seg, h, 0.5, cx+off, cz-R_SIZE/2, 0); }
+                if (!s) addWall(R_SIZE, h, 0.5, cx, cz + R_SIZE/2, 0); else { addWall(seg, h, 0.5, cx-off, cz+R_SIZE/2, 0); addWall(seg, h, 0.5, cx+off, cz+R_SIZE/2, 0); }
+                if (!e) addWall(R_SIZE, h, 0.5, cx + R_SIZE/2, cz, Math.PI/2); else { addWall(seg, h, 0.5, cx+R_SIZE/2, cz-off, Math.PI/2); addWall(seg, h, 0.5, cx+R_SIZE/2, cz+off, Math.PI/2); }
+                if (!w) addWall(R_SIZE, h, 0.5, cx - R_SIZE/2, cz, Math.PI/2); else { addWall(seg, h, 0.5, cx-R_SIZE/2, cz-off, Math.PI/2); addWall(seg, h, 0.5, cx-R_SIZE/2, cz+off, Math.PI/2); }
+                const f = new THREE.Mesh(new THREE.PlaneGeometry(R_SIZE, R_SIZE), floorMat);
+                f.rotation.x = -Math.PI/2; f.position.set(cx, 0, cz); scene.add(f);
+                const r = new THREE.Mesh(new THREE.PlaneGeometry(R_SIZE, R_SIZE), wallMat);
+                r.rotation.x = Math.PI/2; r.position.set(cx, h, cz); scene.add(r);
+            }
+
+            for (let r = -1; r <= 1; r++) for (let c = -1; c <= 1; c++) createRoom(c * R_SIZE, r * R_SIZE, r > -1, r < 1, c < 1, c > -1);
+
+            // Entity
+            entity = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.5, 1.5, 4, 8), new THREE.MeshBasicMaterial({ color: 0x050505 }));
+            body.position.y = 1.25;
+            entity.add(body);
+            const eye = new THREE.Mesh(new THREE.SphereGeometry(0.12), new THREE.MeshBasicMaterial({ color: 0xff0000 }));
+            const eL = eye.clone(); eL.position.set(-0.2, 1.85, 0.4);
+            const eR = eye.clone(); eR.position.set(0.2, 1.85, 0.4);
+            entity.add(eL, eR);
+            scene.add(entity);
+
+            player = new THREE.Group();
+            player.position.set(0, 1.7, 0);
+            scene.add(player);
+            player.add(camera);
+
+            setupControls();
+            resetGame();
+            animate();
+        }
+
+        function resetGame() {
+            player.position.set(0, 1.7, 0);
+            entity.position.set(28, 0, 28);
+            isLightOn = false; flashlight.intensity = 0;
+            deathScreen.style.display = 'none';
+            gameActive = true;
+        }
+
+        let mF = 0, mS = 0, lT = 0, lP = 0, jId = null, lId = null, lx, ly;
+        function setupControls() {
+            window.addEventListener('touchstart', e => {
+                e.preventDefault();
+                for(let t of e.changedTouches) {
+                    if(t.clientX < window.innerWidth/2) jId = t.identifier;
+                    else { lId = t.identifier; lx = t.clientX; ly = t.clientY; }
+                }
+            }, { passive: false });
+            window.addEventListener('touchmove', e => {
+                e.preventDefault();
+                for(let t of e.changedTouches) {
+                    if(t.identifier === jId) {
+                        const rect = document.getElementById('joystick-container').getBoundingClientRect();
+                        const dx = Math.min(Math.max(t.clientX - (rect.left + 40), -35), 35);
+                        const dy = Math.min(Math.max(t.clientY - (rect.top + 40), -35), 35);
+                        document.getElementById('joystick-knob').style.transform = `translate(${dx}px, ${dy}px)`;
+                        mS = dx/35; mF = -dy/35;
+                    }
+                    if(t.identifier === lId) {
+                        lT -= (t.clientX - lx) * 0.007;
+                        lP -= (t.clientY - ly) * 0.007;
+                        lP = Math.max(-1.4, Math.min(1.4, lP));
+                        lx = t.clientX; ly = t.clientY;
+                    }
+                }
+            }, { passive: false });
+            window.addEventListener('touchend', e => {
+                for(let t of e.changedTouches) {
+                    if(t.identifier === jId) { jId = null; mF = 0; mS = 0; document.getElementById('joystick-knob').style.transform = `translate(0,0)`; }
+                    if(t.identifier === lId) lId = null;
+                }
+            });
+        }
+
+        function handleCollision(obj, moveVec) {
+            const pBox = (p) => new THREE.Box3().setFromCenterAndSize(p, new THREE.Vector3(0.9, 1, 0.9));
+            let nextX = obj.position.clone(); nextX.x += moveVec.x;
+            if(!collidableWalls.some(w => pBox(nextX).intersectsBox(w.box))) obj.position.x = nextX.x;
+            let nextZ = obj.position.clone(); nextZ.z += moveVec.z;
+            if(!collidableWalls.some(w => pBox(nextZ).intersectsBox(w.box))) obj.position.z = nextZ.z;
+        }
+
+        const frustum = new THREE.Frustum();
+        const projScreenMatrix = new THREE.Matrix4();
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if(!gameActive) return;
+
+            player.rotation.y = lT;
+            camera.rotation.x = lP;
+
+            // Noticeable Bobbing Logic
+            const isMoving = Math.abs(mF) > 0.1 || Math.abs(mS) > 0.1;
+            if (isMoving) {
+                bobTimer += 0.14; 
+                // Camera Bob
+                camera.position.y = Math.sin(bobTimer) * 0.12;
+                camera.position.x = Math.cos(bobTimer * 0.5) * 0.06;
+                camera.rotation.z = Math.sin(bobTimer * 0.5) * 0.02; // Slight tilt
+                
+                // Hand Bob (Heavier movement)
+                handGroup.position.y = Math.sin(bobTimer + 0.5) * 0.05;
+                handGroup.position.x = Math.cos(bobTimer * 0.5) * 0.03;
+                handGroup.rotation.z = Math.sin(bobTimer) * 0.05;
+            } else {
+                bobTimer += 0.04;
+                // Idle Sway (Breathing)
+                camera.position.y = Math.sin(bobTimer) * 0.02;
+                handGroup.position.y = Math.sin(bobTimer * 0.8) * 0.01;
+                handGroup.position.x = Math.cos(bobTimer * 0.5) * 0.01;
+            }
+
+            // Player Movement
+            const dirF = new THREE.Vector3(0, 0, -1).applyQuaternion(player.quaternion);
+            const dirS = new THREE.Vector3(1, 0, 0).applyQuaternion(player.quaternion);
+            handleCollision(player, dirF.multiplyScalar(mF * 0.22).add(dirS.multiplyScalar(mS * 0.22)));
+
+            // Death and AI
+            projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+            frustum.setFromProjectionMatrix(projScreenMatrix);
+            const inScreen = frustum.containsPoint(entity.position);
+            
+            const rayDir = new THREE.Vector3().subVectors(player.position, entity.position).normalize();
+            raycaster.set(entity.position, rayDir);
+            const intersects = raycaster.intersectObjects(collidableWalls.map(w => w.mesh));
+            const dist = entity.position.distanceTo(player.position);
+            const isBlocked = intersects.length > 0 && intersects[0].distance < dist;
+
+            const hDist = new THREE.Vector2(player.position.x, player.position.z).distanceTo(new THREE.Vector2(entity.position.x, entity.position.z));
+            if (hDist < 1.6) {
+                gameActive = false;
+                deathScreen.style.display = 'flex';
+                setTimeout(() => { resetGame(); }, 5000);
+                return;
+            }
+
+            if (!(inScreen && isLightOn && !isBlocked)) {
+                const eDir = new THREE.Vector3().subVectors(player.position, entity.position).normalize();
+                handleCollision(entity, eDir.multiplyScalar(0.18));
+            }
+            entity.lookAt(player.position.x, 0, player.position.z);
+
+            renderer.render(scene, camera);
+        }
+    </script>
+</body>
+</html>
