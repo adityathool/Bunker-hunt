@@ -140,7 +140,7 @@
             body.rotation.x = Math.PI / 2;
             leftTip = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 12), new THREE.MeshBasicMaterial({ color: 0x000000 }));
             leftTip.position.set(0, 0, -0.18);
-            leftLight = new THREE.SpotLight(0xffffff, 0, 90, 0.55, 0.9, 1.2);
+            leftLight = new THREE.SpotLight(0xffffff, 0, 90, 1, 0.9, 1.2);
             const lt = new THREE.Object3D(); lt.position.set(0, 0, -15);
             leftHand.add(body, leftTip, leftLight, lt); leftLight.target = lt;
             camera.add(leftHand);
@@ -446,3 +446,4 @@
     </script>
 </body>
 </html>
+
