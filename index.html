@@ -9,17 +9,16 @@
         body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #000; position: fixed; font-family: 'Courier New', Courier, monospace; }
         #overlay { position: fixed; inset: 0; background: #000; color: white; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; }
         #start-btn { padding: 20px 50px; font-size: 20px; background: #900; color: white; border: none; cursor: pointer; border-radius: 5px; font-weight: bold; }
-        #game-container { width: 100%; height: 100%; position: relative; cursor: crosshair; }
+        #game-container { width: 100vw; height: 100vh; position: relative; cursor: crosshair; }
         #death-screen, #win-screen { position: absolute; inset: 0; background: #000; z-index: 2000; display: none; flex-direction: column; align-items: center; justify-content: center; font-size: 24px; text-align: center; padding: 20px; font-weight: bold; letter-spacing: 4px; }
         #death-screen { color: #f00; }
         #win-screen { color: #0f0; }
         #ui-stats { position: absolute; top: 20px; width: 100%; text-align: center; color: #fff; z-index: 100; font-weight: bold; letter-spacing: 2px; text-shadow: 2px 2px #000; pointer-events: none; }
         #message-log { position: absolute; top: 20%; width: 100%; text-align: center; color: #0f0; z-index: 100; font-weight: bold; font-size: 18px; letter-spacing: 3px; pointer-events: none; opacity: 0; transition: opacity 0.5s; text-shadow: 0 0 10px #0f0; }
-        #crosshair { position: absolute; top: 50%; left: 50%; width: 20px; height: 20px; transform: translate(-50%, -50%); pointer-events: none; z-index: 10; display: flex; align-items: center; justify-content: center; }
-        #crosshair::before { content: ''; position: absolute; width: 2px; height: 100%; background: rgba(255,255,255,0.5); }
-        #crosshair::after { content: ''; position: absolute; height: 2px; width: 100%; background: rgba(255,255,255,0.5); }
+        #crosshair { position: absolute; top: 50%; left: 50%; width: 10px; height: 10px; transform: translate(-50%, -50%); pointer-events: none; z-index: 10; display: flex; align-items: center; justify-content: center; }
+        #crosshair::before { content: ''; position: absolute; width: 2px; height: 100%; background: rgba(0,255,0,0.7); }
+        #crosshair::after { content: ''; position: absolute; height: 2px; width: 100%; background: rgba(0,255,0,0.7); }
         
-        /* UI HUD - Hidden by default on PC until touch is detected, or kept for reference */
         .mobile-ctrl { position: absolute; z-index: 150; }
         #joystick-container { bottom: 12%; left: 8%; width: 80px; height: 80px; background: rgba(255,255,255,0.1); border: 2px solid rgba(255,255,255,0.2); border-radius: 50%; }
         #joystick-knob { position: absolute; top: 20px; left: 20px; width: 40px; height: 40px; background: #fff; border-radius: 50%; opacity: 0.7; }
@@ -81,9 +80,8 @@
         let artifacts = [];
         let collectedCount = 0;
         
-        // Input States
         const keys = { w: false, a: false, s: false, d: false };
-        let mF = 0, mS = 0, lT = 0, lP = 0; // Movement and Look variables
+        let mF = 0, mS = 0, lT = 0, lP = 0;
         let jId = null, lId = null, lx, ly;
 
         const bulletGeo = new THREE.BoxGeometry(0.04, 0.04, 0.8);
@@ -110,13 +108,16 @@
         const wallTex = createGrimeTexture('#1a1a1a', '#2a221a'), floorTex = createGrimeTexture('#080808', '#1a1510'), ceilingTex = createGrimeTexture('#151515', '#0f1a0f', true);
 
         document.getElementById('start-btn').addEventListener('click', () => {
+            if (document.documentElement.requestFullscreen) {
+                document.documentElement.requestFullscreen().catch(e => console.log(e));
+            }
+
             document.getElementById('overlay').style.display = 'none';
             if(!window.gameInitialized) {
                 init(); 
             } else {
                 resetGame();
             }
-            // Request Pointer Lock for PC
             if(window.innerWidth > 1024) {
                 document.body.requestPointerLock();
             }
@@ -128,10 +129,17 @@
             scene.fog = new THREE.Fog(0x000000, 20, 80); 
             
             camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 200);
-            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
             renderer.setSize(window.innerWidth, window.innerHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); 
+            renderer.setPixelRatio(2); 
+            
             document.getElementById('game-container').appendChild(renderer.domElement);
+
+            window.addEventListener('resize', () => {
+                camera.aspect = window.innerWidth / window.innerHeight;
+                camera.updateProjectionMatrix();
+                renderer.setSize(window.innerWidth, window.innerHeight);
+            });
 
             scene.add(new THREE.AmbientLight(0xffffff, 0.20));
 
@@ -140,7 +148,7 @@
             body.rotation.x = Math.PI / 2;
             leftTip = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 12), new THREE.MeshBasicMaterial({ color: 0x000000 }));
             leftTip.position.set(0, 0, -0.18);
-            leftLight = new THREE.SpotLight(0xffffff, 0, 90, 1, 0.9, 1.2);
+            leftLight = new THREE.SpotLight(0xffffff, 0, 90, 0.9, 0.9, 1.2);
             const lt = new THREE.Object3D(); lt.position.set(0, 0, -15);
             leftHand.add(body, leftTip, leftLight, lt); leftLight.target = lt;
             camera.add(leftHand);
@@ -157,7 +165,6 @@
             pistolGroup.add(slide, grip, muzzleAnchor);
             camera.add(pistolGroup);
 
-            // Level Generation (Rooms)
             const R_SIZE = 45, D_GAP = 3.2, FULL_H = 12, DOOR_H = 4.5;
             const wallMat = new THREE.MeshStandardMaterial({ map: wallTex }), ceilingMat = new THREE.MeshStandardMaterial({ map: ceilingTex });
 
@@ -180,15 +187,17 @@
                 f.rotation.x = -Math.PI/2; f.position.set(cx, 0, cz); scene.add(f);
                 const cp = new THREE.Mesh(new THREE.PlaneGeometry(R_SIZE, R_SIZE), ceilingMat);
                 cp.rotation.x = Math.PI/2; cp.position.set(cx, FULL_H, cz); scene.add(cp);
+                
+                // FIXED GEOMETRY: Horizontal, parallel, non-collinear box lights
                 for(let i = -1; i <= 1; i++) {
-                    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 10, 8), new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xff4400, emissiveIntensity: 1 }));
-                    tube.position.set(cx + (i * 6), FULL_H - 0.2, cz); tube.rotation.x = Math.PI / 2;
+                    const tube = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.1, 10), new THREE.MeshStandardMaterial({ color: 0x111111, emissive: 0xff4400, emissiveIntensity: 1 }));
+                    // Set horizontal on ceiling (Y), parallel along Z, spaced out on X
+                    tube.position.set(cx + (i * 6), FULL_H - 0.05, cz); 
                     scene.add(tube); tubeMeshes.push(tube);
                 }
             }
             for (let r = -2; r <= 2; r++) for (let c = -2; c <= 2; c++) createRoom(c * R_SIZE, r * R_SIZE, r > -2, r < 2, c < 2, c > -2);
 
-            // Exit Door
             const doorFrame = new THREE.Group();
             const frameMat = new THREE.MeshStandardMaterial({ color: 0x00ff00, emissive: 0x00ff00, emissiveIntensity: 2 });
             const leftBar = new THREE.Mesh(new THREE.BoxGeometry(0.2, 4.5, 0.2), frameMat); leftBar.position.set(-1.6, 2.25, 0);
@@ -203,7 +212,6 @@
             scene.add(doorFrame);
             exitDoor = doorFrame;
 
-            // Artifacts
             const artColors = [0xff0000, 0x00ff00, 0x0000ff];
             artColors.forEach((color) => {
                 const art = new THREE.Mesh(new THREE.IcosahedronGeometry(0.5, 0), new THREE.MeshStandardMaterial({ color: 0x000000, emissive: color, emissiveIntensity: 6 }));
@@ -212,7 +220,6 @@
                 artifacts.push(art);
             });
 
-            // Entity
             entity = new THREE.Group();
             const eBody = new THREE.Mesh(new THREE.CapsuleGeometry(0.55, 2.2, 8, 12), new THREE.MeshStandardMaterial({ color: 0x000000 }));
             eBody.position.y = 2.5;
@@ -235,24 +242,57 @@
             leftTip.material.color.setHex(isLightOn ? 0xffffff : 0x000000);
         }
 
-        function shoot() {
+      function shoot() {
             if(!gameActive || isJumpscaring || isEntityDead) return;
-            raycaster.setFromCamera(new THREE.Vector2(0,0), camera);
-            const intersects = raycaster.intersectObject(entity, true);
+
+            // 1. Setup Raycaster from the center of the screen
+            raycaster.setFromCamera(new THREE.Vector2(0,-0.05), camera);
+            const hitIntersects = raycaster.intersectObjects(scene.children, true);
             
-            if (intersects.length > 0 && isLightOn) {
-                isEntityDead = true;
-                entityDeathTimer = 10.0;
-                entity.traverse((child) => { if (child.material && child.material.emissive) child.material.emissiveIntensity = 0; });
+            let aimTarget = new THREE.Vector3();
+            
+            if (hitIntersects.length > 0) {
+                // If we hit a wall or object, that specific 3D point is our target
+                aimTarget.copy(hitIntersects[0].point);
+
+                // Original Entity hit logic
+                if (hitIntersects[0].object.parent === entity && isLightOn) {
+                    isEntityDead = true;
+                    entityDeathTimer = 10.0;
+                    entity.traverse((child) => { 
+                        if (child.material && child.material.emissive) child.material.emissiveIntensity = 0; 
+                    });
+                }
+            } else {
+                // If we hit nothing (the void), project a point 100 units in front of the camera
+                // We must use World Position and World Direction for accuracy
+                const worldDir = new THREE.Vector3();
+                camera.getWorldDirection(worldDir);
+                camera.getWorldPosition(aimTarget);
+                aimTarget.add(worldDir.multiplyScalar(100));
             }
 
-            muzzleLight.intensity = 20; muzzleFlashMesh.visible = true; muzzleFlashMesh.scale.set(1, 1, 1);
-            const startPos = new THREE.Vector3(); muzzleAnchor.getWorldPosition(startPos);
-            const targetPos = new THREE.Vector3(); camera.getWorldDirection(targetPos); 
-            const camWorldPos = new THREE.Vector3(); camera.getWorldPosition(camWorldPos);
-            targetPos.multiplyScalar(100).add(camWorldPos);
-            const b = new THREE.Mesh(bulletGeo, bulletMat); b.position.copy(startPos); b.lookAt(targetPos); scene.add(b); bullets.push(b);
-            recoilZ = 0.25; recoilRot = 0.4;
+            // 2. Handle Muzzle Effects
+            muzzleLight.intensity = 20; 
+            muzzleFlashMesh.visible = true; 
+            muzzleFlashMesh.scale.set(1, 1, 1);
+
+            // 3. Spawn Bullet
+            const startPos = new THREE.Vector3(); 
+            muzzleAnchor.getWorldPosition(startPos); // Get the actual world position of the gun tip
+
+            const b = new THREE.Mesh(bulletGeo, bulletMat); 
+            b.position.copy(startPos); 
+            
+            // Orient the bullet to look at the point the crosshair is touching
+            b.lookAt(aimTarget);
+            
+            scene.add(b); 
+            bullets.push(b);
+
+            // 4. Apply Recoil
+            recoilZ = 0.25; 
+            recoilRot = 0.4;
         }
 
         function handleCollision(obj, moveVec, isPlayer) {
@@ -281,7 +321,6 @@
         }
 
         function setupControls() {
-            // TOUCH CONTROLS
             window.addEventListener('touchstart', e => {
                 if(isJumpscaring) return;
                 for(let t of e.changedTouches) {
@@ -314,7 +353,6 @@
             document.getElementById('flashlight-toggle').addEventListener('touchstart', (e) => { e.preventDefault(); toggleLight(); });
             document.getElementById('fire-btn').addEventListener('touchstart', (e) => { e.preventDefault(); shoot(); });
 
-            // PC CONTROLS (Keyboard & Mouse)
             window.addEventListener('keydown', e => {
                 const k = e.key.toLowerCase();
                 if(k === 'w') keys.w = true; if(k === 's') keys.s = true;
@@ -345,7 +383,6 @@
             requestAnimationFrame(animate);
             if(!gameActive) return;
 
-            // Handle PC Movement Logic
             if(jId === null) {
                 mF = (keys.w ? 1 : 0) - (keys.s ? 1 : 0);
                 mS = (keys.d ? 1 : 0) - (keys.a ? 1 : 0);
@@ -366,7 +403,6 @@
                 return;
             }
 
-            // Artifact Collection
             artifacts.forEach(art => {
                 if(art.visible) {
                     art.rotation.y += 0.05; art.rotation.x += 0.02;
@@ -379,10 +415,8 @@
                 }
             });
 
-            // Lighting effects
             tubeMeshes.forEach(t => { if (Math.random() > 0.995) { const on = t.material.emissiveIntensity > 0; t.material.emissiveIntensity = on ? 0 : 1; t.material.color.setHex(on ? 0x111111 : 0x221100); } });
 
-            // Collision and Movement
             _playerBox.setFromCenterAndSize(player.position, _pSize);
             if (exitDoor.visible) {
                 _exitBox.setFromCenterAndSize(exitDoor.position, new THREE.Vector3(3, 5, 3));
@@ -394,7 +428,6 @@
                 }
             }
 
-            // Entity AI
             if (isEntityDead) {
                 entityDeathTimer -= 0.016;
                 let fallProgress = Math.min(1.0, (10.0 - entityDeathTimer) * 2);
@@ -424,7 +457,6 @@
                 entity.lookAt(player.position.x, 0, player.position.z);
             }
 
-            // Final Camera/Weapon Transforms
             player.rotation.y = lT; camera.rotation.x = lP;
             const speedScale = Math.min(Math.sqrt(mF*mF + mS*mS), 1.0);
             bobTimer += (0.05 + (speedScale * 0.16)); 
@@ -446,4 +478,3 @@
     </script>
 </body>
 </html>
-
